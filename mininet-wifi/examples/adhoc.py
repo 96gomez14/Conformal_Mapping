@@ -23,22 +23,26 @@ def topology(autoTxPower):
         sta2 = net.addStation('sta2', position='50,10,0', range=100)
         sta3 = net.addStation('sta3', position='90,10,0', range=100)
     else:
-        sta1 = net.addStation('sta1', position='10,10,0')
-        sta2 = net.addStation('sta2', position='50,10,0')
-        sta3 = net.addStation('sta3', position='90,10,0')
+        sta1 = net.addStation('sta1', position='10,10,0', min_x=10, max_x=30, min_y=20, max_y=70, min_v=5, max_v=10)
+        sta2 = net.addStation('sta2', position='50,10,0', min_x=30, max_x=70, min_y=20, max_y=70, min_v=5, max_v=10)
+        sta3 = net.addStation('sta3', position='90,10,0', min_x=60, max_x=100, min_y=10, max_y=80, min_v=5, max_v=10)
 
     net.setPropagationModel(model="logDistance", exp=4)
+    net.plotGraph(max_x=300, max_y=300)
+
+    net.setMobilityModel(time=0, model='RandomWayPoint', max_x=120, max_y=120,
+                            min_v=0.3, max_v=0.5, seed=1, ac_method='ssf')
 
     info("*** Configuring wifi nodes\n")
     net.configureWifiNodes()
 
-    info("*** Creating links\n")
-    net.addLink(sta1, cls=adhoc, ssid='adhocNet',
-                mode='g', channel=5, ht_cap='HT40+')
-    net.addLink(sta2, cls=adhoc, ssid='adhocNet',
-                mode='g', channel=5)
-    net.addLink(sta3, cls=adhoc, ssid='adhocNet',
-                mode='g', channel=5, ht_cap='HT40+')
+#    info("*** Creating links\n")
+#    net.addLink(sta1, cls=adhoc, ssid='adhocNet',
+#                mode='g', channel=5, ht_cap='HT40+')
+#    net.addLink(sta2, cls=adhoc, ssid='adhocNet',
+#                mode='g', channel=5)
+#    net.addLink(sta3, cls=adhoc, ssid='adhocNet',
+#                mode='g', channel=5, ht_cap='HT40+')
 
     info("*** Starting network\n")
     net.build()

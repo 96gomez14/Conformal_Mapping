@@ -1,13 +1,12 @@
-"""
-Example topology of Quagga routers
-"""
+#!/usr/bin/python
 
-import inspect
-import os
-from mininext.topo import Topo
-from mininext.services.quagga import QuaggaService
+import sys
 
-from collections import namedtuple
+from mininet.log import setLogLevel, info
+from mn_wifi.link import wmediumd, adhoc
+from mn_wifi.cli import CLI_wifi
+from mn_wifi.net import Mininet_wifi
+from mn_wifi.wmediumdConnector import interference
 
 from socket import *
 from threading import Thread, Lock
@@ -215,3 +214,49 @@ def riplite(hosts, links):
                 print_tables(glob_routing_table, hosts)
                 break
             start_time = time.time()
+
+def topology():
+    "Create a network."
+    net = Mininet_wifi(link=wmediumd, wmediumd_mode=interference)
+
+    info("*** Creating nodes\n")
+    net.addStation('sta1', mac='00:00:00:00:00:02', ip='10.0.0.2/8',
+                   min_x=10, max_x=200, min_y=10, max_y=200, min_v=5, max_v=10)
+    net.addStation('sta2', mac='00:00:00:00:00:03', ip='10.0.0.3/8',
+                   min_x=50, max_x=200, min_y=10, max_y=80, min_v=1, max_v=5)
+    net.addStation('sta3', mac='00:00:00:00:00:03', ip='10.0.0.4/8',
+                   min_x=50, max_x=200, min_y=10, max_y=80, min_v=1, max_v=5)
+    net.addStation('sta4', mac='00:00:00:00:00:03', ip='10.0.0.5/8',
+                   min_x=10, max_x=200, min_y=10, max_y=80, min_v=1, max_v=5)
+    net.addStation('sta5', mac='00:00:00:00:00:03', ip='10.0.0.6/8',
+                   min_x=10, max_x=200, min_y=130, max_y=200, min_v=1, max_v=5)
+    net.addStation('sta6', mac='00:00:00:00:00:03', ip='10.0.0.7/8',
+                   min_x=50, max_x=200, min_y=130, max_y=200, min_v=1, max_v=5)
+    net.addStation('sta7', mac='00:00:00:00:00:03', ip='10.0.0.8/8',
+                   min_x=50, max_x=200, min_y=130, max_y=200, min_v=1, max_v=5)
+    net.addStation('sta8', mac='00:00:00:00:00:03', ip='10.0.0.9/8',
+                   min_x=10, max_x=200, min_y=10, max_y=200, min_v=1, max_v=5)
+
+    net.setPropagationModel(model="logDistance", exp=4)
+
+    net.plotGraph(max_x=200, max_y=200)
+    info("*** Configuring wifi nodes\n")
+    net.configureWifiNodes()
+
+#    net.plotGraph(max_x=300, max_y=300)
+
+    net.setMobilityModel(time=0, model='RandomWayPoint', 
+                        seed=1, ac_method='ssf')
+    info("*** Starting network\n")
+    net.build()
+
+    info("*** Running CLI\n")
+    CLI_wifi(net)
+
+    info("*** Stopping network\n")
+    net.stop()
+
+
+if __name__ == '__main__':
+    setLogLevel('info')
+    topology()

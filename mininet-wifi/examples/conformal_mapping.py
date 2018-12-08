@@ -12,56 +12,17 @@ from socket import *
 from threading import Thread, Lock
 import time
 import ast
+import scipy.integrate as integrate
+import math
 
-def all_equal(table, tablelocks):
+def distance(p1, p2):
     '''
-    Helper function that simply checks whether,
-    around this time, each host has not changed
-    its own DV in its personal routing table, since
-    another period has elapsed.
+    Helper method for calculating the
+    Euclidean distance between the two
+    given points.
     '''
-    hosts = table.keys()
-    count = 0
-    for host in hosts:
-        tablelocks[host].acquire()
-        if not table[host]['changed']:
-            count += 1
-        tablelocks[host].release()
-    return count == len(hosts)
+    return math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
-def print_tables(routing_table, hosts):
-    '''
-    Prints the contents of each node's DV,
-    as this is the thing that they personally
-    alter as needed, when they receive possible
-    changes from their immediate neighbors.
-    '''
-    print("The following three-tuples are of the form (destination, distance, next).")
-    for host in hosts:
-        s = host
-        for host2 in hosts:
-            s += " (" + host2 + ', ' + str(routing_table[host][host2][0]) + ', ' + str(routing_table[host][host2][1]) + ') '
-        print(s)
-
-def copy_DV(dv, dv_lock, host):
-    '''
-    Creates a deep copy of the calling
-    node's personal distance vector, taken
-    from its own routing table. This avoids
-    the coupled solution of having to pass
-    locks for one host's distance vector, to
-    different hosts. Furthermore, we can afford
-    to do this, because the size of the routing
-    tables is constant with the number of hosts.
-    '''
-    cp_dv = {}
-    dv_lock.acquire()
-    keys = dv.keys()
-    keys.remove('changed')
-    for key in keys:
-        cp_dv[key] = dv[key]
-    dv_lock.release()
-    return cp_dv
 
 def client(host, neighbor_ports, DV, DV_lock):
     '''
@@ -82,25 +43,6 @@ def client(host, neighbor_ports, DV, DV_lock):
 
 def server(host, serverSocket, rtable, DV_lock, personal_host_ports, f_lock):
     while(1):
-        flock.acquire()
-        f = open("weights.txt", "r")
-        lines = f.readlines()
-        f.close()
-        flock.release()
-        for line in lines:
-            spl = line.split()
-            neighbor = None
-            if spl[0] == host:
-                neighbor = spl[1]
-            elif spl[1] == host:
-                neighbor = spl[0]
-            if neighbor != None:
-                DV_lock.acquire()
-                if rtable[host][neighbor] > int(spl[2]):
-                    rtable[host]['changed'] = True
-                    rtable[host][neighbor][0] = int(spl[2])
-                    rtable[host][neighbor][1] = neighbor
-                DV_lock.release()
         connectionSocket, addr = serverSocket.accept()
         n_DVstr = connectionSocket.recv(512)    #Should cover the max size of data transported over the socket
         connectionSocket.close()
@@ -116,104 +58,46 @@ def server(host, serverSocket, rtable, DV_lock, personal_host_ports, f_lock):
                 rtable[host][key][1] = sending_host
         DV_lock.release()                   # know to send out to neighbors
 
-def riplite(hosts, links):
+def SC_inverse(w, Zs, Bs):
     '''
-    This function is called in the startup
-    code for Part C. From here, we start
-    each host's server process, which runs
-    continuously, and we periodically start
-    and end client threads for each node, so
-    as to send updates if the weights in the file
-    have been changed.
+    Function for computing the Schwarz-Christoffel inverse
+    for a given point within our polygon; maps from the
+    original network graph to the disk.
     '''
-    file_str = "weights.txt"
-    f = open(file_str, "r")
-    lines = f.readlines()
-    f.close()
-    glob_routing_table = {}
-    for host in hosts:          # First loop in initialization pseudocode
-        glob_routing_table[host] = {}
-        for column in hosts:
-            glob_routing_table[host][column] = [2**32, None]
-        glob_routing_table[host][host] = [0, None]    # Setting the (dist, next) values for each host's path to itself
-        glob_routing_table[host]['changed'] = False
+    prodx = 1
+    prody = 1
+    n = len(Zs)
+    for i in range(n):
+        prodx = prodx * (w[0] - zs[i][0])**bs[i]
+        prody = prody * (w[1] - zs[i][1])**bs[i]
 
-    for host in hosts:          # Finishing initialization of global weights
-        for line in lines:
-            spl = line.split()
-            if spl[0] == host:
-                glob_routing_table[host][spl[1]] = [int(spl[2]), spl[1]]
-            elif spl[1] == host:
-                glob_routing_table[host][spl[0]] = [int(spl[2]), spl[0]]
+    return (prodx, prody)
 
+
+def conformal_mapping(nodes_dict):
+    '''
+    This function is called to start our
+    utilization of our conformal mapping.
+    '''
+    tangent_angles = [0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]
+    circle_vertices = [(-0.98993, 0.14155),(-0.99478, 0.10202), (-0.99480, 0.10184), (-0.99978, - 0.02078), (0.97883, -0.20466), (0.99872, -0.05063), (0.99873, -0.05041), (1.00000, 0.00000)]
+
+    node_names = nodes_dict.keys()
     server_sockets = {}    # Array of sockets, each corresponding to a different node in the network
     serverPort= 64000
     host_ports = {}
-    for host in hosts:   # Since these threads all run on the same machine, we
-        host_ports[host] = serverPort   # are just varying ports over the hosts
+    for node_name in node_names:   # Since these threads all run on the same machine, we
+        host_ports[node_name] = serverPort   # are just varying ports over the hosts
         serverSocket = socket(AF_INET, SOCK_STREAM)
         serverSocket.bind(('', serverPort))
         serverSocket.listen(1)
-        server_sockets[host] = serverSocket
+        server_sockets[node_name] = serverSocket
         serverPort += 1
 
-    host_tablelocks = {}
-    for host in hosts:
-        host_tablelocks[host] = Lock()
-
-    flock = Lock()
-    glob_host_ports = {}
-    for host in hosts:      # Second loop in initialization pseudocode
-        flock.acquire()
-        f = open("weights.txt", "r")
-        lines = f.readlines()
-        f.close()
-        flock.release()
-        altered_table = False
-        personal_routing_table = {}
-        personal_routing_table[host] = {}
-        for host2 in hosts:
-            personal_routing_table[host][host2] = glob_routing_table[host][host2]
-        glob_host_ports[host] = {}
-        for line in lines:
-            spl = line.split()
-            neighbor = None
-            if spl[0] == host:
-                neighbor = spl[1]
-            elif spl[1] == host:
-                neighbor = spl[0]
-            personal_routing_table[neighbor] = {}
-            for host2 in hosts:
-                personal_routing_table[neighbor][host2] = None
-            if neighbor != None:
-                glob_host_ports[host][neighbor] = host_ports[neighbor]
-        t = Thread(target= server, args=(host, server_sockets[host], personal_routing_table, host_tablelocks[host], glob_host_ports[host], flock))
-
-    for host in hosts:
-        t = Thread(target= client, args= (host, glob_host_ports[host], glob_routing_table[host], host_tablelocks[host]))
+    for node_name in node_names:
+        t = Thread(target= server, args=(nodes_dict, node_name, server_sockets[node_name], tangent_angles, circle_vertices))
         t.start()
 
-    start_time = time.time()
-    noChangeCount = 0
-    while 1:
-        curr_time = time.time()
-        if curr_time - start_time >= 30 and not all_equal(glob_routing_table, host_tablelocks):
-            noChangeCount = 0
-            for host in hosts:
-                host_tablelocks[host].acquire()
-                t = None
-                if glob_routing_table[host]['changed']:
-                    t = Thread(target= client, args= (host, glob_host_ports[host], glob_routing_table[host], host_tablelocks[host]))
-                host_tablelocks[host].release()
-                if t != None:
-                    t.start()
-            start_time = time.time()
-        elif curr_time - start_time >= 30:
-            noChangeCount += 1
-            if noChangeCount == 3:
-                print_tables(glob_routing_table, hosts)
-                break
-            start_time = time.time()
 
 def topology():
     "Create a network."
@@ -224,31 +108,34 @@ def topology():
                    min_x=10, max_x=200, min_y=10, max_y=200, min_v=5, max_v=10)
     net.addStation('sta2', mac='00:00:00:00:00:03', ip='10.0.0.3/8',
                    min_x=50, max_x=200, min_y=10, max_y=80, min_v=1, max_v=5)
-    net.addStation('sta3', mac='00:00:00:00:00:03', ip='10.0.0.4/8',
+    net.addStation('sta3', mac='00:00:00:00:00:04', ip='10.0.0.4/8',
                    min_x=50, max_x=200, min_y=10, max_y=80, min_v=1, max_v=5)
-    net.addStation('sta4', mac='00:00:00:00:00:03', ip='10.0.0.5/8',
+    net.addStation('sta4', mac='00:00:00:00:00:05', ip='10.0.0.5/8',
                    min_x=10, max_x=200, min_y=10, max_y=80, min_v=1, max_v=5)
-    net.addStation('sta5', mac='00:00:00:00:00:03', ip='10.0.0.6/8',
+    net.addStation('sta5', mac='00:00:00:00:00:06', ip='10.0.0.6/8',
                    min_x=10, max_x=200, min_y=130, max_y=200, min_v=1, max_v=5)
-    net.addStation('sta6', mac='00:00:00:00:00:03', ip='10.0.0.7/8',
+    net.addStation('sta6', mac='00:00:00:00:00:07', ip='10.0.0.7/8',
                    min_x=50, max_x=200, min_y=130, max_y=200, min_v=1, max_v=5)
-    net.addStation('sta7', mac='00:00:00:00:00:03', ip='10.0.0.8/8',
+    net.addStation('sta7', mac='00:00:00:00:00:08', ip='10.0.0.8/8',
                    min_x=50, max_x=200, min_y=130, max_y=200, min_v=1, max_v=5)
-    net.addStation('sta8', mac='00:00:00:00:00:03', ip='10.0.0.9/8',
+    net.addStation('sta8', mac='00:00:00:00:00:09', ip='10.0.0.9/8',
                    min_x=10, max_x=200, min_y=10, max_y=200, min_v=1, max_v=5)
 
     net.setPropagationModel(model="logDistance", exp=4)
 
-    net.plotGraph(max_x=200, max_y=200)
+    net.plotGraph(max_x=300, max_y=300)
+
     info("*** Configuring wifi nodes\n")
     net.configureWifiNodes()
 
-#    net.plotGraph(max_x=300, max_y=300)
-
-    net.setMobilityModel(time=0, model='RandomWayPoint', 
+    net.setMobilityModel(time=0, model='RandomWayPoint',
                         seed=1, ac_method='ssf')
     info("*** Starting network\n")
     net.build()
+
+    src = net.nameToNode["sta2"]        # source node
+    dst = net.nameToNode["sta7"].IP()   # destination node IP address
+    #conformal_mapping(net.nameToNode)
 
     info("*** Running CLI\n")
     CLI_wifi(net)

@@ -93,34 +93,34 @@ def server(nodes_dict, node_name, dst_node, server_socket, host_ports):
     n = len(node_names)
     this_server_socket = server_socket
     this = nodes_dict[node_name]
-    #while(1):
-    this_pos = this.params['position'][:2]
-    dst_pos = dst_node.params["position"][:2]
-    dst_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], dst_pos[0])[0]
-    dst_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], dst_pos[1])[0]
-    connection_socket, addr = this_server_socket.accept()
-    connection_socket.close()
-    min_dist = 2**32        # Represents a distance that must be greater than all successive distances
-    closest_neighbor_port = None
-    while closest_neighbor_port == None:    # It could be that after traversing all nodes, we run into a temporary local minimum
-        for i in range(n):
-            if node_names[i] != node_name:
-                neighbor = nodes_dict[node_names[i]]
-                neighbor_pos = neighbor.params["position"][:2]
-                if distance(this_pos, neighbor_pos) <= RANGE:       # We use real coordinates for finding in-range neighbors,
-                    if neighbor.IP() == dst_node.IP():              # because the nodes must be in range of each other in the
-                        print("pong")                               # actual network.
-                        return
-                    else:
-                        neighbor_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], neighbor_pos[0])[0]
-                        neighbor_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], neighbor_pos[1])[0]
-                        disk_distance = distance((dst_circ_pos_x, dst_circ_pos_y), (neighbor_circ_pos_x, neighbor_circ_pos_y))
-                        if min_dist > disk_distance:
-                            min_dist = disk_distance
-                            closest_name = node_names[i]
-                            closest_neighbor_port = host_ports[closest_name]
+    while(1):
+        this_pos = this.params['position'][:2]
+        dst_pos = dst_node.params["position"][:2]
+        dst_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], dst_pos[0])[0]
+        dst_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], dst_pos[1])[0]
+        connection_socket, addr = this_server_socket.accept()
+        connection_socket.close()
+        min_dist = 2**32        # Represents a distance that must be greater than all successive distances
+        closest_neighbor_port = None
+        while closest_neighbor_port == None:    # It could be that after traversing all nodes, we run into a temporary local minimum
+            for i in range(n):
+                if node_names[i] != node_name:
+                    neighbor = nodes_dict[node_names[i]]
+                    neighbor_pos = neighbor.params["position"][:2]
+                    if distance(this_pos, neighbor_pos) <= RANGE:       # We use real coordinates for finding in-range neighbors,
+                        if neighbor.IP() == dst_node.IP():              # because the nodes must be in range of each other in the
+                            print("pong")                               # actual network.
+                            return
+                        else:
+                            neighbor_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], neighbor_pos[0])[0]
+                            neighbor_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], neighbor_pos[1])[0]
+                            disk_distance = distance((dst_circ_pos_x, dst_circ_pos_y), (neighbor_circ_pos_x, neighbor_circ_pos_y))
+                            if min_dist > disk_distance:
+                                min_dist = disk_distance
+                                closest_name = node_names[i]
+                                closest_neighbor_port = host_ports[closest_name]
 
-    client(closest_neighbor_port, this_server_socket)
+        client(closest_neighbor_port, this_server_socket)
 
 
 def conformal_mapping(src_node, dst_node, nodes_dict):

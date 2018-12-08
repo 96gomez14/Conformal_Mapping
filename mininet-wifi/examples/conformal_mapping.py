@@ -15,76 +15,122 @@ import ast
 import scipy.integrate as integrate
 import math
 
+RANGE = 100      # Communication radio range for each node
+
 def distance(p1, p2):
     '''
     Helper method for calculating the
     Euclidean distance between the two
     given points.
     '''
-    return math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+    operand1 = p2[0] - p1[0]
+    operand2 = p2[1] - p1[1]
+    return math.sqrt((operand1)**2 + (operand2)**2)
 
 
-def client(host, neighbor_ports, DV, DV_lock):
+def SC_inverse_x(x):
+    '''
+    Function for computing the derivative of the
+    Schwarz-Christoffel inverse for the x-coordinate of
+    a given point within our polygon; maps from the
+    original network graph to the disk.
+    '''
+    # The turning angles for my boundary graph's vertices
+    Bs = [0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]
+    # Coordinates for the set boundary points on our disk
+    Zs = [-0.98993, -0.99478, -0.99480, -0.99978, 0.97883, 0.99872, 0.99873, 1.00000]
+    prodx = 1
+    n = len(Zs)
+    for i in range(n):
+        negatex = False
+        if (x - Zs[i]) < 0:
+            negatex = True
+        prodx = prodx * math.fabs((x - Zs[i]))**Bs[i]
+        if negatex == True:
+            prodx = prodx * -1
+
+    return prodx
+
+def SC_inverse_y(y):
+    '''
+    Function for computing the derivative of the
+    Schwarz-Christoffel inverse for the y-coordinate of
+    a given point within our polygon; maps from the
+    original network graph to the disk.
+    '''
+    # The turning angles for my boundary graph's vertices
+    Bs = [0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]
+    # Coordinates for the set boundary points on our disk
+    Zs = [0.14155, 0.10202, 0.10184, -0.02078, 0.20466, -0.05063, -0.05041, 0.00000]
+    prody = 1
+    n = len(Zs)
+    for i in range(n):
+        negatey = False
+        if (y - Zs[i]) < 0:
+            negatey = True
+        prody = prody * math.fabs((y - Zs[i]))**Bs[i]
+        if negatey == True:
+            prody = prody * -1
+
+    return prody
+
+
+def client(closest_neighbor_port, client_socket):
     '''
     Sets up and tears down a TCP connection, over
     which the calling host sends its personal DV
     to its neighbors, in the event that the DV has
     been altered since they last received it.
     '''
-    neighbors = neighbor_ports.keys()
-    cp_dv = copy_DV(DV, DV_lock, host)
-    msg = host + " " + str(cp_dv)
-    for neighbor in neighbors:
-        serverName = gethostname()
-        clientSocket = socket(AF_INET, SOCK_STREAM)
-        clientSocket.connect((serverName, neighbor_ports[neighbor]))
-        clientSocket.send(msg)
-        clientSocket.close()
+    server_name = gethostname()
+    client_socket.connect((server_name, closest_neighbor_port))
+    client_socket.send("ping")
+    client_socket.close()
 
-def server(host, serverSocket, rtable, DV_lock, personal_host_ports, f_lock):
-    while(1):
-        connectionSocket, addr = serverSocket.accept()
-        n_DVstr = connectionSocket.recv(512)    #Should cover the max size of data transported over the socket
-        connectionSocket.close()
-        n_DV = ast.literal_eval(n_DVstr[3:])    # Converts the string back to dict
-        sending_host = n_DVstr[:2]   # The sending host's name in the message
-        rtable[sending_host] = n_DV
-        nkeys = n_DV.keys()
-        DV_lock.acquire()
-        for key in nkeys:
-            if n_DV[key][0] < rtable[host][key][0]:
-                rtable[host]['changed'] = True  # Lets the corresponding client
-                rtable[host][key][0] = n_DV[key][0]  # socket thread for this host
-                rtable[host][key][1] = sending_host
-        DV_lock.release()                   # know to send out to neighbors
+def server(nodes_dict, node_name, dst_node, server_socket, host_ports):
+    w_0 = (3.15, 10.65)     # The approximate centroid of our MANET's polygonal boundary
+    node_names = nodes_dict.keys()
+    n = len(node_names)
+    this_server_socket = server_socket
+    this = nodes_dict[node_name]
+    #while(1):
+    this_pos = this.params['position'][:2]
+    dst_pos = dst_node.params["position"][:2]
+    dst_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], dst_pos[0])[0]
+    dst_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], dst_pos[1])[0]
+    connection_socket, addr = this_server_socket.accept()
+    connection_socket.close()
+    min_dist = 2**32        # Represents a distance that must be greater than all successive distances
+    closest_neighbor_port = None
+    while closest_neighbor_port == None:    # It could be that after traversing all nodes, we run into a temporary local minimum
+        for i in range(n):
+            if node_names[i] != node_name:
+                neighbor = nodes_dict[node_names[i]]
+                neighbor_pos = neighbor.params["position"][:2]
+                if distance(this_pos, neighbor_pos) <= RANGE:       # We use real coordinates for finding in-range neighbors,
+                    if neighbor.IP() == dst_node.IP():              # because the nodes must be in range of each other in the
+                        print("pong")                               # actual network.
+                        return
+                    else:
+                        neighbor_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], neighbor_pos[0])[0]
+                        neighbor_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], neighbor_pos[1])[0]
+                        disk_distance = distance((dst_circ_pos_x, dst_circ_pos_y), (neighbor_circ_pos_x, neighbor_circ_pos_y))
+                        if min_dist > disk_distance:
+                            min_dist = disk_distance
+                            closest_name = node_names[i]
+                            closest_neighbor_port = host_ports[closest_name]
 
-def SC_inverse(w, Zs, Bs):
-    '''
-    Function for computing the Schwarz-Christoffel inverse
-    for a given point within our polygon; maps from the
-    original network graph to the disk.
-    '''
-    prodx = 1
-    prody = 1
-    n = len(Zs)
-    for i in range(n):
-        prodx = prodx * (w[0] - zs[i][0])**bs[i]
-        prody = prody * (w[1] - zs[i][1])**bs[i]
-
-    return (prodx, prody)
+    client(closest_neighbor_port, this_server_socket)
 
 
-def conformal_mapping(nodes_dict):
+def conformal_mapping(src_node, dst_node, nodes_dict):
     '''
     This function is called to start our
     utilization of our conformal mapping.
     '''
-    tangent_angles = [0.5, 0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]
-    circle_vertices = [(-0.98993, 0.14155),(-0.99478, 0.10202), (-0.99480, 0.10184), (-0.99978, - 0.02078), (0.97883, -0.20466), (0.99872, -0.05063), (0.99873, -0.05041), (1.00000, 0.00000)]
-
     node_names = nodes_dict.keys()
     server_sockets = {}    # Array of sockets, each corresponding to a different node in the network
-    serverPort= 64000
+    serverPort= 42000
     host_ports = {}
     for node_name in node_names:   # Since these threads all run on the same machine, we
         host_ports[node_name] = serverPort   # are just varying ports over the hosts
@@ -95,8 +141,40 @@ def conformal_mapping(nodes_dict):
         serverPort += 1
 
     for node_name in node_names:
-        t = Thread(target= server, args=(nodes_dict, node_name, server_sockets[node_name], tangent_angles, circle_vertices))
+        t = Thread(target= server, args=(nodes_dict, node_name, dst_node, server_sockets[node_name], host_ports))
         t.start()
+
+    n = len(node_names)
+    closest_neighbor_port = None
+    min_dist = 2**32
+
+    # TODO  Make a helper function for the below code: it is identical in two different spots
+    w_0 = (3.15, 10.65)
+    src_pos = src_node.params["position"][:2]
+    dst_pos = dst_node.params["position"][:2]
+    dst_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], dst_pos[0])[0]
+    dst_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], dst_pos[1])[0]
+    while closest_neighbor_port == None:
+        for i in range(n):
+            if node_names[i] != src_node.name:
+                neighbor = nodes_dict[node_names[i]]
+                neighbor_pos = neighbor.params["position"][:2]
+                if distance(src_pos, neighbor_pos) <= RANGE:
+                    if neighbor.IP() == dst_node.IP():
+                        print("pong")
+                        return
+                    else:
+                        neighbor_circ_pos_x = integrate.quad(lambda x: SC_inverse_x(x), w_0[0], neighbor_pos[0])[0]
+                        neighbor_circ_pos_y = integrate.quad(lambda y: SC_inverse_y(y), w_0[1], neighbor_pos[1])[0]
+                        disk_distance = distance((dst_circ_pos_x, dst_circ_pos_y), (neighbor_circ_pos_x, neighbor_circ_pos_y))
+                        if min_dist > disk_distance:
+                            min_dist = disk_distance
+                            closest_name = node_names[i]
+                            closest_neighbor_port = host_ports[closest_name]
+
+    src_socket = server_sockets[src_node.name]
+    t = Thread(target= client, args= (closest_neighbor_port, src_socket))
+    t.start()
 
 
 def topology():
@@ -133,9 +211,9 @@ def topology():
     info("*** Starting network\n")
     net.build()
 
-    src = net.nameToNode["sta2"]        # source node
-    dst = net.nameToNode["sta7"].IP()   # destination node IP address
-    #conformal_mapping(net.nameToNode)
+    src_node = net.nameToNode["sta2"]        # source node
+    dst_node = net.nameToNode["sta7"]   # destination node
+    conformal_mapping(src_node, dst_node, net.nameToNode)
 
     info("*** Running CLI\n")
     CLI_wifi(net)
